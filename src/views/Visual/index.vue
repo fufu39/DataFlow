@@ -97,7 +97,7 @@ const generateNewBatch = () => {
 
     const newBlocks = []
     for (let i = 0; i < TOTAL_BLOCKS_PER_BATCH; i++) {
-      const isBusiness = Math.random() > 0.6
+      const isBusiness = Math.random() > 0.3
       if (isBusiness) stats.business++
       else stats.general++
 
@@ -226,7 +226,7 @@ const triggerFilter = () => {
     })
 
     // 增加额外延迟，等待数据块移动动画 (2.5s) 完成
-    const moveDuration = 2500 // 对应 .data-block 的 1.5s transition
+    const moveDuration = 2500 // 对应 .data-block 的 2.5s transition
     const unlockTimerId = setTimeout(() => {
       isFiltering.value = false // 此时才真正解锁
       runningTimeouts.delete(unlockTimerId)
@@ -408,15 +408,38 @@ const reorderReceivedBlocks = () => {
   // 遍历每个批次，为其中的数据块计算最终的堆叠位置
   batchKeys.forEach((batchId, batchIndex) => {
     const batchBlocks = batches[batchId]
-    const visibleBlocks = batchBlocks.slice(-5)
-    // 找到同一批次中那些需要移动但最终不显示的块
-    const hiddenBlocks = batchBlocks.slice(0, batchBlocks.length - 5)
+    
+    const specialBlocks = batchBlocks.filter((b) => b.type === 'special')
+    const businessBlocks = batchBlocks.filter((b) => b.type === 'business')
+
+    const specialBlock = specialBlocks.slice(-1)[0] // 取出唯一的粉色块
+    const businessToShow = businessBlocks.slice(-4) // 最多取 4 个蓝色块
+
+    const visibleBlocks = []
+
+    if (specialBlock) {
+      // 如果有粉色块，动态计算中间点
+      const middleIndex = Math.floor(businessToShow.length / 2)
+      
+      // 1. 添加中间点之前的蓝色块
+      visibleBlocks.push(...businessToShow.slice(0, middleIndex))
+      // 2. 添加粉色块
+      visibleBlocks.push(specialBlock)
+      // 3. 添加中间点之后的蓝色块
+      visibleBlocks.push(...businessToShow.slice(middleIndex))
+    } else {
+      // 如果没有粉色块，就只显示最多 5 个蓝色块
+      visibleBlocks.push(...businessBlocks.slice(-5))
+    }
+
+    const allVisibleIds = new Set(visibleBlocks.map((b) => b.id))
+    const hiddenBlocks = batchBlocks.filter((b) => !allVisibleIds.has(b.id))
 
     // 控制水平位置和垂直位置
     const stackBaseLeft = recipientZoneLeft + (batchIndex % 2) * (availableWidth / 2) + 4
     const stackBaseTop = Math.floor(batchIndex / 2) * 25 + 16
 
-    // 为可见的5个块设置最终的层叠位置
+    // 为可见的块设置最终的层叠位置
     visibleBlocks.forEach((block, index) => {
       block.style.left = `${stackBaseLeft + index * 0.5}%`
       block.style.top = `${stackBaseTop + index * 1.5}%`
@@ -451,7 +474,7 @@ const proceedWithIdentification = () => {
     const col = index % numCols
     const xOffsetPercent = (col + 0.5) * (100 / numCols)
     const yOffsetPercent = (row + 1) * (100 / (numRows + 1.5))
-    block.state = 'identified' //状态变更为已识别
+    block.state = 'identified'
     block.style.top = `${yOffsetPercent}%`
     block.style.left = `${zoneWidth * 3 + (xOffsetPercent / 100) * (zoneWidth - 4) + 2}%`
   })
@@ -461,7 +484,7 @@ const proceedWithIdentification = () => {
     // 遍历所有数据块，将已识别的块标记为已接收
     dataBlocks.value.forEach((block) => {
       if (block.state === 'identified') {
-        block.state = 'received' // 状态变更为“已接收”
+        block.state = 'received' // 状态变更为“已接收” (CSS里已改为按类型变色)
         stats.received++ // 增加已接收计数
       }
     })
@@ -472,13 +495,37 @@ const proceedWithIdentification = () => {
       if (stageIndex.value === 5) {
         stageIndex.value = 6 // 进入“批次完成”阶段
         const currentBatchId = batchCounter.value
-        // 筛选出当前批次中所有已接收的块
+
+        // 复后的清理逻辑，筛选出当前批次中所有已接收的块
         const receivedBlocksInCurrentBatch = dataBlocks.value.filter(
           (b) => b.batchId === currentBatchId && b.state === 'received'
         )
-        // 从中选出最后5个可见的块
-        const visibleBlocksInCurrentBatch = receivedBlocksInCurrentBatch.slice(-5)
-        const visibleBlockIds = new Set(visibleBlocksInCurrentBatch.map((b) => b.id))
+
+        // --- 重新执行 reorderReceivedBlocks 中的“可见块”筛选逻辑 ---
+        // 这一步至关重要，确保我们只保留那些“可见”的块
+        const specialBlocks = receivedBlocksInCurrentBatch.filter((b) => b.type === 'special')
+        const businessBlocks = receivedBlocksInCurrentBatch.filter((b) => b.type === 'business')
+
+        const specialBlock = specialBlocks.slice(-1)[0]
+        const businessToShow = businessBlocks.slice(-4)
+        const visibleBlocks = [] // 用来存放真正可见的块
+
+        if (specialBlock) {
+          // 动态居中逻辑
+          const middleIndex = Math.floor(businessToShow.length / 2)
+          visibleBlocks.push(...businessToShow.slice(0, middleIndex))
+          visibleBlocks.push(specialBlock)
+          visibleBlocks.push(...businessToShow.slice(middleIndex))
+        } else {
+          // Fallback
+          visibleBlocks.push(...businessBlocks.slice(-5))
+        }
+        // --- 筛选逻辑结束 ---
+
+        // 现在 visibleBlockIdsInCurrentBatch 只包含那 5 个可见块的 ID
+        const visibleBlockIdsInCurrentBatch = new Set(
+          visibleBlocks.map((b) => b.id)
+        )
 
         // 过滤 dataBlocks 数组
         dataBlocks.value = dataBlocks.value.filter((b) => {
@@ -486,8 +533,8 @@ const proceedWithIdentification = () => {
           if (b.batchId !== currentBatchId) {
             return true
           }
-          // 如果是当前批次的块，则仅保留那5个可见的
-          return visibleBlockIds.has(b.id)
+          // 如果是当前批次的块，则仅保留那些“可见”的 (在 reorder 中选中的)
+          return visibleBlockIdsInCurrentBatch.has(b.id)
         })
       }
       // 当定时器执行完毕后，从追踪集合中移除其ID
@@ -513,9 +560,8 @@ const triggerIdentify = () => {
   if (decoys.length > 0) {
     // 1. 如果有干扰项，触发它们的“向上吹出”消除动画
     decoys.forEach((decoy, index) => {
-      // decoy.style.transitionDelay = `${index * 0.05}s`
       decoy.style.animationDelay = `${index * 0.05}s`
-      decoy.style.transitionDelay = ''
+      decoy.style.transitionDelay = '' // 清除
       decoy.state = 'decoy-removing' // 触发 CSS 消失动画
     })
 
@@ -1185,21 +1231,19 @@ const showFilterScanner = ref(false)
 .data-block.business .inner-block {
   background-color: #00aaff;
   border-color: #61dafb;
-  box-shadow: 0 0 15px #00aaff; /* 业务数据块发光效果 */
+  /* box-shadow: 0 0 15px #00aaff; */
 }
 
 /* 新增粉色数据块样式 */
 .data-block.special .inner-block {
   background-color: #ff69b4; /* 亮粉色 */
   border-color: #ff85c0;
-  box-shadow: 0 0 15px #ff69b4; /* 粉色发光效果 */
 }
 
 /* 新增干扰项样式 */
 .data-block.decoy .inner-block {
   background-color: #909399; /* 灰白色 */
   border-color: #c0c4cc;
-  box-shadow: 0 0 10px #909399;
 }
 
 /* 状态动画 */
@@ -1227,10 +1271,14 @@ const showFilterScanner = ref(false)
 
 /* 干扰项消除动画（向上吹出） */
 .data-block.decoy-removing {
+  /* 动画属性应用 */
   animation-name: blow-out-up;
   animation-duration: 1s; /* 必须匹配 JS 中的 baseRemovalTime */
   animation-timing-function: cubic-bezier(0.5, 0, 0.75, 1);
   animation-fill-mode: forwards; /* 关键：使动画停留在 'to' 状态 */
+  
+  /* 移除 transition，防止与 animation 冲突 */
+  transition: none; 
 }
 /* 干扰项向上吹出动画 */
 @keyframes blow-out-up {
@@ -1363,21 +1411,18 @@ const showFilterScanner = ref(false)
 .data-block.labeled .inner-block {
   background-color: #ffa022;
   border-color: #ffc966;
-  box-shadow: 0 0 15px #ffa022;
 }
 
-/* 已识别状态的样式 */
-.data-block.identified .inner-block {
-  background-color: #00ff8c;
-  border-color: #13c96b;
-  box-shadow: 0 0 8px rgba(57, 255, 20, 0.2);
-}
 /* 已接收状态的样式 */
-.data-block.received .inner-block {
-  background-color: #00ff8c;
-  border-color: #13c96b;
-  box-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+.data-block.business.received .inner-block {
+  background-color: #00aaff;
+  border-color: #61dafb;
 }
+.data-block.special.received .inner-block {
+  background-color: #ff69b4; /* 亮粉色 */
+  border-color: #ff85c0;
+}
+
 
 .data-block.identified {
   animation: identified-float 6s ease-in-out infinite;
