@@ -1,3 +1,4 @@
+<!-- 标识生成可视化 -->
 <script setup>
 import { ref, reactive, onBeforeUnmount } from 'vue'
 import { Position, CollectionTag, CircleCheck, Filter, Aim } from '@element-plus/icons-vue'
@@ -232,84 +233,39 @@ const triggerLabel = () => {
   // 必须在流程为2才能注入标识
   if (stageIndex.value !== 2) return
   const zoneWidth = 100 / 5
-
-  // 在此阶段随机插入3-5个粉色数据块
-  const numSpecialBlocks = Math.floor(Math.random() * 4) + 3
-  const newSpecialBlocks = []
-  for (let i = 0; i < numSpecialBlocks; i++) {
-    newSpecialBlocks.push({
-      id: Date.now() + i + 1000, // 增加偏移量避免瞬时ID冲突
-      batchId: batchCounter.value,
-      type: 'special', // 新类型，用于CSS设置粉色
-      state: 'toLabeling', // 初始状态为“待打标签”，以便被后续逻辑捕获
-      labelId: null,
-      showLabel: true,
-      // specialLabelDelay: true, // 不再需要特殊延迟
-      style: {
-        // 初始位置随机分布在“标识引擎”区域
-        top: `${Math.random() * 70 + 15}%`,
-        left: `${zoneWidth * 2 + Math.random() * (zoneWidth - 10) + 5}%`,
-        // 初始状态为透明和缩小，用于淡入
-        transform: 'scale(0.8)',
-        opacity: 0,
-        animationDelay: `${Math.random() * 2}s`,
-        // zIndex 随机，实现和蓝色块的穿插 (蓝色块默认为1)
-        zIndex: Math.random() > 0.5 ? 2 : 0
-      }
-    })
-  }
-  // 将新创建的粉色块添加到主数组中
-  dataBlocks.value.push(...newSpecialBlocks)
-
-  // 使用短setTimeout来触发 CSS 过渡，实现淡入效果
-  setTimeout(() => {
-    dataBlocks.value.forEach((block) => {
-      // 找到刚才添加的透明块
-      if (block.type === 'special' && block.style.opacity === 0) {
-        block.style.transform = 'scale(1)'
-        block.style.opacity = 1
-      }
-    })
-  }, 20) // 20ms 延迟确保初始状态已渲染
-
-  // 筛选出所有需要处理的数据块 (现在自动包括了 'business' 和我们刚添加的 'special')
+  // 筛选出所有需要处理的数据块
   const blocksToProcess = dataBlocks.value.filter((block) => block.state === 'toLabeling')
   if (blocksToProcess.length === 0) {
     stageIndex.value = 3
     return
   }
 
-  // 延迟 0.5s 执行，等待粉色块浮现并停顿
-  const labelTimerId = setTimeout(() => {
-    const timeoutPromises = blocksToProcess.map((block) => {
-      // 立即改变状态和统计数据，提供即时视觉反馈 (例如颜色变化)
-      block.state = 'labeled' // 变色逻辑(CSS)会在这里触发
-      stats.labeled++
-      labelCounter.value++
-      block.labelId = `${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String(
-        labelCounter.value
-      ).padStart(3, '0')}` // 标识(HTML)会在这里触发
+  const timeoutPromises = blocksToProcess.map((block) => {
+    // 立即改变状态和统计数据，提供即时视觉反馈 (例如颜色变化)
+    block.state = 'labeled'
+    stats.labeled++
+    labelCounter.value++
+    block.labelId = `${String.fromCharCode(65 + Math.floor(Math.random() * 26))}${String(
+      labelCounter.value
+    ).padStart(3, '0')}`
 
-      // 返回一个在setTimeout完成后解决的Promise
-      return new Promise((resolve) => {
-        const timerId = setTimeout(() => {
-          block.state = 'toIdentifying' // 状态变更为“待识别”
-          // 移动到下一个区域（识别核心）
-          block.style.top = `${Math.random() * 70 + 15}%`
-          block.style.left = `${zoneWidth * 3 + Math.random() * (zoneWidth - 10) + 5}%`
-          runningTimeouts.delete(timerId)
-          resolve() // Promise 完成
-        }, 1000) // 延时1秒
-        runningTimeouts.add(timerId)
-      })
+    // 返回一个在setTimeout完成后解决的Promise
+    return new Promise((resolve) => {
+      const timerId = setTimeout(() => {
+        block.state = 'toIdentifying' // 状态变更为“待识别”
+        // 移动到下一个区域（识别核心）
+        block.style.top = `${Math.random() * 70 + 15}%`
+        block.style.left = `${zoneWidth * 3 + Math.random() * (zoneWidth - 10) + 5}%`
+        runningTimeouts.delete(timerId)
+        resolve() // Promise 完成
+      }, 1000) // 延时1秒
+      runningTimeouts.add(timerId)
     })
-    Promise.all(timeoutPromises).then(() => {
-      // 所有数据块都准备就绪后，才将流程推进到下一阶段
-      stageIndex.value = 3
-    })
-    runningTimeouts.delete(labelTimerId)
-  }, 500) // 延迟 0.5s 执行变色和打标签
-  runningTimeouts.add(labelTimerId)
+  })
+  Promise.all(timeoutPromises).then(() => {
+    // 所有数据块都准备就绪后，才将流程推进到下一阶段
+    stageIndex.value = 3
+  })
 }
 
 // 执行：重新排序已接收的数据块，在接收端整齐堆叠
@@ -457,15 +413,20 @@ const isFiltering = ref(false)
 
 <template>
   <div class="visual-container">
+    <!-- 多层背景星空 -->
     <div class="starfield">
       <div class="stars stars1"></div>
       <div class="stars stars2"></div>
       <div class="stars stars3"></div>
     </div>
+    <!-- 顶部控制面板 -->
     <div class="control-panel">
+      <!-- 标题 -->
       <div class="title" @dblclick="resetSimulation">
+        <!-- <el-icon><Flag /></el-icon> -->
         <span>标识生成与识别可视化系统</span>
       </div>
+      <!-- 操作按钮 -->
       <div class="actions">
         <div class="custom-button-group">
           <el-button
@@ -512,14 +473,18 @@ const isFiltering = ref(false)
       </div>
     </div>
 
+    <!-- 主流程可视化区域 -->
     <div class="main-flow">
+      <!-- 动画层，用于承载所有移动的数据块 -->
       <div class="flow-animation-layer">
+        <!-- 生成阶段动画粒子 -->
         <div
           v-for="p in generationParticles"
           :key="p.id"
           class="generation-particle"
           :style="p.style"
         ></div>
+        <!-- 渲染数据块 -->
         <div
           v-for="block in dataBlocks"
           :key="block.id"
@@ -527,15 +492,18 @@ const isFiltering = ref(false)
           :style="block.style"
         >
           <div class="inner-block"></div>
+          <!-- 当数据块状态为 'filtered' 时，显示粒子消散效果 -->
           <template v-if="block.state === 'filtered'">
             <div class="particle" v-for="i in 5" :key="i"></div>
           </template>
+          <!-- 如果数据块有 labelId 并且需要显示，则渲染标签 -->
           <div v-if="block.labelId && block.showLabel" class="tag-id">
             {{ block.labelId }}
           </div>
         </div>
       </div>
 
+      <!-- 1.数据源区域 -->
       <div class="flow-zone source-zone" :class="{ active: stageIndex === 0 }">
         <div
           class="zone-header"
@@ -570,6 +538,7 @@ const isFiltering = ref(false)
           <span v-else>待机</span>
         </div>
       </div>
+      <!-- 2.网关路由区域 -->
       <div class="flow-zone gateway-zone" :class="{ active: stageIndex === 1 }">
         <div
           class="zone-header"
@@ -598,6 +567,7 @@ const isFiltering = ref(false)
           <span v-else>待机</span>
         </div>
       </div>
+      <!-- 3.标签引擎区域 -->
       <div class="flow-zone label-zone" :class="{ active: stageIndex === 2 }">
         <div
           class="zone-header"
@@ -625,6 +595,7 @@ const isFiltering = ref(false)
           <span v-else>待机</span>
         </div>
       </div>
+      <!-- 4.识别核心区域 -->
       <div class="flow-zone identify-zone" :class="{ active: stageIndex === 3 }">
         <div
           class="zone-header"
@@ -648,10 +619,12 @@ const isFiltering = ref(false)
           </div>
         </div>
         <div class="zone-status" :class="{ active: stageIndex >= 3 }">
+          <!-- <div class="scanner" v-if="stageIndex === 4"></div> -->
           <span v-if="stageIndex >= 4">数据识别完成</span>
           <span v-else>待机</span>
         </div>
       </div>
+      <!-- 5.接收端区域 -->
       <div
         class="flow-zone recipient-zone"
         :class="{ active: stageIndex === 4 || stageIndex === 5 }"
@@ -1082,13 +1055,6 @@ const isFiltering = ref(false)
   box-shadow: 0 0 15px #00aaff; /* 业务数据块发光效果 */
 }
 
-/* 新增粉色数据块样式 */
-.data-block.special .inner-block {
-  background-color: #ff69b4; /* 亮粉色 */
-  border-color: #ff85c0;
-  box-shadow: 0 0 15px #ff69b4; /* 粉色发光效果 */
-}
-
 /* 状态动画 */
 .data-block.idle,
 .data-block.moving,
@@ -1219,7 +1185,6 @@ const isFiltering = ref(false)
   border-color: #ffc966;
   box-shadow: 0 0 15px #ffa022;
 }
-
 /* 已识别状态的样式 */
 .data-block.identified .inner-block {
   background-color: #00ff8c;
@@ -1259,7 +1224,7 @@ const isFiltering = ref(false)
   font-weight: bold;
   white-space: nowrap;
   opacity: 0;
-  animation: inject-tag 1s forwards 0.5s; /* 默认 0.5s 延迟 */
+  animation: inject-tag 1s forwards 0.5s;
   text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
   pointer-events: none;
 }
