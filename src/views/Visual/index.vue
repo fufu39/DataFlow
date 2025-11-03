@@ -1,3 +1,4 @@
+<!-- 标识生成与识别可视化界面 -->
 <script setup>
 import { ref, reactive, onBeforeUnmount } from 'vue'
 import { Position, CollectionTag, CircleCheck, Filter, Aim } from '@element-plus/icons-vue'
@@ -457,27 +458,46 @@ const reorderReceivedBlocks = () => {
   })
 }
 
-// 新增函数：执行识别
-// (此函数在 triggerIdentify 内部调用)
+// 新增函数：执行识别 (此函数在 triggerIdentify 内部调用)
 const proceedWithIdentification = () => {
   stageIndex.value = 4 // 激活“识别中”状态
   const zoneWidth = 100 / 5
   // 筛选时排除了干扰项（它们已被移除）
   const businessBlocks = dataBlocks.value.filter((b) => b.state === 'toIdentifying')
+  
+  // 修改后的随机插入逻辑
   const numCols = 4 //在识别区排列的列数
-  const numRows = Math.ceil(businessBlocks.length / numCols) //计算列数
 
-  // 遍历待识别的业务数据块，将它们在识别区内排列成网格状
-  businessBlocks.forEach((block, index) => {
+  // 分离蓝色块和粉色块
+  const blueBlocks = businessBlocks.filter(b => b.type === 'business');
+  const pinkBlocks = businessBlocks.filter(b => b.type === 'special');
+
+  // 将粉色块随机插入到蓝色块数组中
+  let shuffledBlocks = [...blueBlocks];
+  pinkBlocks.forEach(pinkBlock => {
+    // 随机选择一个插入位置
+    // (shuffledBlocks.length + 1) 确保可以插在最前面或最后面
+    const randomIndex = Math.floor(Math.random() * (shuffledBlocks.length + 1));
+    // (randomIndex, 0, pinkBlock) 0代表不删除，只插入
+    shuffledBlocks.splice(randomIndex, 0, pinkBlock);
+  });
+
+  // 根据混合后的块总数计算行数
+  const numRows = Math.ceil(shuffledBlocks.length / numCols); 
+
+  // 现在遍历混合后的 shuffledBlocks 来设置位置
+  shuffledBlocks.forEach((block, index) => {
     stats.identified++ //增加已识别计数
     const row = Math.floor(index / numCols)
     const col = index % numCols
     const xOffsetPercent = (col + 0.5) * (100 / numCols)
     const yOffsetPercent = (row + 1) * (100 / (numRows + 1.5))
-    block.state = 'identified'
+    block.state = 'identified' // ⭐ 状态变更为已识别 (CSS里已改为橙色)
     block.style.top = `${yOffsetPercent}%`
     block.style.left = `${zoneWidth * 3 + (xOffsetPercent / 100) * (zoneWidth - 4) + 2}%`
-  })
+  });
+
+
   // 模拟识别过程
   const timerId1 = setTimeout(() => {
     stageIndex.value = 5 // 进入“传输至接收端”阶段
@@ -496,13 +516,12 @@ const proceedWithIdentification = () => {
         stageIndex.value = 6 // 进入“批次完成”阶段
         const currentBatchId = batchCounter.value
 
-        // 复后的清理逻辑，筛选出当前批次中所有已接收的块
+        // 筛选出当前批次中所有已接收的块
         const receivedBlocksInCurrentBatch = dataBlocks.value.filter(
           (b) => b.batchId === currentBatchId && b.state === 'received'
         )
 
         // --- 重新执行 reorderReceivedBlocks 中的“可见块”筛选逻辑 ---
-        // 这一步至关重要，确保我们只保留那些“可见”的块
         const specialBlocks = receivedBlocksInCurrentBatch.filter((b) => b.type === 'special')
         const businessBlocks = receivedBlocksInCurrentBatch.filter((b) => b.type === 'business')
 
