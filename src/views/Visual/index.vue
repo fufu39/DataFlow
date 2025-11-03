@@ -176,11 +176,12 @@ const triggerFilter = () => {
   // --- 步骤1: 启动扫描动画 ---
   stageIndex.value = 2 // 立即更新阶段，激活区域样式
   isFiltering.value = true // 锁定
+  showFilterScanner.value = true // 激活 v-if，显示扫描线
   const scanDuration = 1500 // 扫描动画总时长
   const dissipationDuration = 800 // 数据块自身的消散动画时长 (来自CSS)
   const zoneWidth = 100 / 5
 
-  // --- 步骤2: 遍历当前区域的数据块，为它们“安排”动画 ---
+  // --- 步骤2: 遍历当前区域的数据块，为它们安排动画 ---
   dataBlocks.value.forEach((block) => {
     if (block.state === 'moving') {
       // --- 对于“一般数据”，计算并触发渐进式消散 ---
@@ -213,7 +214,7 @@ const triggerFilter = () => {
 
   // --- 步骤3: 在扫描动画结束后，统一处理“业务数据”的流转 ---
   const moveTimerId = setTimeout(() => {
-    // isFiltering.value = false // 不在这里解锁
+    showFilterScanner.value = false // 扫描动画结束 (1.5s)，立即移除扫描线
     dataBlocks.value.forEach((block) => {
       // 找到那些没有被过滤掉的业务数据块
       if (block.state === 'moving' && block.type === 'business') {
@@ -225,7 +226,7 @@ const triggerFilter = () => {
     })
 
     // 增加额外延迟，等待数据块移动动画 (2.5s) 完成
-    const moveDuration = 2500 // 对应 .data-block 的 2.5s transition
+    const moveDuration = 2500 // 对应 .data-block 的 1.5s transition
     const unlockTimerId = setTimeout(() => {
       isFiltering.value = false // 此时才真正解锁
       runningTimeouts.delete(unlockTimerId)
@@ -556,6 +557,8 @@ const isRecipientHovered = ref(false)
 const generationParticles = ref([])
 // 过滤扫描动画的显示状态
 const isFiltering = ref(false)
+// 专门控制扫描线的显示
+const showFilterScanner = ref(false)
 </script>
 
 <template>
@@ -690,7 +693,7 @@ const isFiltering = ref(false)
           </Transition>
         </div>
         <div class="zone-content">
-          <div v-if="isFiltering" class="filter-scanner"></div>
+          <div v-if="showFilterScanner" class="filter-scanner"></div>
           <div class="stat-item single">
             <span class="label">已过滤</span>
             <span class="value filtered">{{ stats.filtered }}</span>
