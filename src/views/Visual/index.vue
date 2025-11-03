@@ -8,6 +8,7 @@ defineOptions({
 
 // 定义流程各阶段索引
 // -1:待命, 0:已生成, 1:发送中, 2:过滤中, 3:注入中, 4:识别中, 5:传输至接收端, 6:批次完成
+// -2 (生成中), -3 (注入中), -4 (识别中) 是临时锁定状态，用于禁用所有按钮
 const stageIndex = ref(-1)
 // 存储各项统计数据
 const stats = reactive({
@@ -174,7 +175,7 @@ const triggerFilter = () => {
 
   // --- 步骤1: 启动扫描动画 ---
   stageIndex.value = 2 // 立即更新阶段，激活区域样式
-  isFiltering.value = true // 显示扫描线
+  isFiltering.value = true // 锁定
   const scanDuration = 1500 // 扫描动画总时长
   const dissipationDuration = 800 // 数据块自身的消散动画时长 (来自CSS)
   const zoneWidth = 100 / 5
@@ -212,7 +213,7 @@ const triggerFilter = () => {
 
   // --- 步骤3: 在扫描动画结束后，统一处理“业务数据”的流转 ---
   const moveTimerId = setTimeout(() => {
-    isFiltering.value = false // 隐藏扫描线
+    // isFiltering.value = false // 不在这里解锁
     dataBlocks.value.forEach((block) => {
       // 找到那些没有被过滤掉的业务数据块
       if (block.state === 'moving' && block.type === 'business') {
@@ -222,19 +223,79 @@ const triggerFilter = () => {
         block.style.left = `${zoneWidth * 2 + Math.random() * (zoneWidth - 10) + 5}%`
       }
     })
+
+    // 增加额外延迟，等待数据块移动动画 (2.5s) 完成
+    const moveDuration = 2500 // 对应 .data-block 的 2.5s transition
+    const unlockTimerId = setTimeout(() => {
+      isFiltering.value = false // 此时才真正解锁
+      runningTimeouts.delete(unlockTimerId)
+    }, moveDuration)
+    runningTimeouts.add(unlockTimerId)
+
     runningTimeouts.delete(moveTimerId)
   }, scanDuration)
   runningTimeouts.add(moveTimerId)
+}
+
+// 新增函数：注入干扰项
+// (此函数在 triggerLabel 末尾调用)
+const injectDecoyBlocks = () => {
+  // 返回一个 Promise，以便在动画完成后才解锁按钮
+  return new Promise((resolve) => {
+    const zoneWidth = 100 / 5
+    const zoneLeft = zoneWidth * 3 // 目标区域：识别核心
+    const numDecoys = Math.floor(Math.random() * 6) + 5 // 随机 5-10 个
+    const newDecoys = []
+
+    for (let i = 0; i < numDecoys; i++) {
+      newDecoys.push({
+        id: Date.now() + i + 2000, // 新的 ID 范围
+        batchId: batchCounter.value,
+        type: 'decoy', // 新类型：干扰项
+        state: 'decoy-idle', // 新状态：干扰项待命
+        labelId: null,
+        showLabel: false,
+        style: {
+          top: '110%', // 初始位置在屏幕下方
+          left: `${zoneLeft + Math.random() * (zoneWidth - 10) + 5}%`, // 随机横向位置
+          transform: 'scale(1)',
+          opacity: 1,
+          animationDelay: `${Math.random() * 0.5}s`, // 错开浮动动画
+          zIndex: Math.random() > 0.5 ? 2 : 0 // 随机层级
+        }
+      })
+    }
+    dataBlocks.value.push(...newDecoys)
+
+    // 触发“吹入”动画
+    setTimeout(() => {
+      dataBlocks.value.forEach((block) => {
+        if (block.type === 'decoy' && block.style.top === '110%') {
+          block.style.top = `${Math.random() * 70 + 15}%` // 移动到区域内的随机Y位置
+        }
+      })
+    }, 20)
+
+    // 干扰项的“吹入”动画在 CSS 中设置为 1.5s
+    const decoyTimerId = setTimeout(() => {
+      runningTimeouts.delete(decoyTimerId)
+      resolve() // 1.5s 后，Promise 完成
+    }, 1500)
+    runningTimeouts.add(decoyTimerId)
+  })
 }
 
 // 执行：注入标识
 const triggerLabel = () => {
   // 必须在流程为2才能注入标识
   if (stageIndex.value !== 2) return
+  // 按钮禁用
+  // 设置为临时状态 -3，禁用所有按钮
+  stageIndex.value = -3
   const zoneWidth = 100 / 5
 
   // 在此阶段随机插入3-5个粉色数据块
-  const numSpecialBlocks = Math.floor(Math.random() * 4) + 3
+  const numSpecialBlocks = Math.floor(Math.random() * 3) + 3
   const newSpecialBlocks = []
   for (let i = 0; i < numSpecialBlocks; i++) {
     newSpecialBlocks.push({
@@ -244,7 +305,6 @@ const triggerLabel = () => {
       state: 'toLabeling', // 初始状态为“待打标签”，以便被后续逻辑捕获
       labelId: null,
       showLabel: true,
-      // specialLabelDelay: true, // 不再需要特殊延迟
       style: {
         // 初始位置随机分布在“标识引擎”区域
         top: `${Math.random() * 70 + 15}%`,
@@ -275,14 +335,17 @@ const triggerLabel = () => {
   // 筛选出所有需要处理的数据块 (现在自动包括了 'business' 和我们刚添加的 'special')
   const blocksToProcess = dataBlocks.value.filter((block) => block.state === 'toLabeling')
   if (blocksToProcess.length === 0) {
-    stageIndex.value = 3
+    // 逻辑变更：如果没块要处理，直接注入干扰项
+    injectDecoyBlocks().then(() => {
+      stageIndex.value = 3 // 解锁下一步
+    })
     return
   }
 
   // 延迟 0.5s 执行，等待粉色块浮现并停顿
   const labelTimerId = setTimeout(() => {
-    const timeoutPromises = blocksToProcess.map((block) => {
-      // 立即改变状态和统计数据，提供即时视觉反馈 (例如颜色变化)
+    // 1. 遍历所有块，让它们变色、获取ID，并开始移动
+    blocksToProcess.forEach((block) => {
       block.state = 'labeled' // 变色逻辑(CSS)会在这里触发
       stats.labeled++
       labelCounter.value++
@@ -290,24 +353,26 @@ const triggerLabel = () => {
         labelCounter.value
       ).padStart(3, '0')}` // 标识(HTML)会在这里触发
 
-      // 返回一个在setTimeout完成后解决的Promise
-      return new Promise((resolve) => {
-        const timerId = setTimeout(() => {
-          block.state = 'toIdentifying' // 状态变更为“待识别”
-          // 移动到下一个区域（识别核心）
-          block.style.top = `${Math.random() * 70 + 15}%`
-          block.style.left = `${zoneWidth * 3 + Math.random() * (zoneWidth - 10) + 5}%`
-          runningTimeouts.delete(timerId)
-          resolve() // Promise 完成
-        }, 1000) // 延时1秒
-        runningTimeouts.add(timerId)
-      })
-    })
-    Promise.all(timeoutPromises).then(() => {
-      // 所有数据块都准备就绪后，才将流程推进到下一阶段
-      stageIndex.value = 3
+      // 状态变更和“开始移动”逻辑
+      block.state = 'toIdentifying' // 状态变更为“待识别”
+      // 移动到下一个区域（识别核心），这个CSS动画时长为 2.5s
+      block.style.top = `${Math.random() * 70 + 15}%`
+      block.style.left = `${zoneWidth * 3 + Math.random() * (zoneWidth - 10) + 5}%`
     })
     runningTimeouts.delete(labelTimerId)
+
+    // 动画顺序调整
+    // 设置一个定时器，等待 2.5s，即等所有块都移动完成
+    const moveDuration = 2500 // 必须与 .data-block 的 transition 时长(2.5s)匹配
+    const moveTimerId = setTimeout(() => {
+      // 所有块移动到位后，才开始注入干扰项
+      injectDecoyBlocks().then(() => {
+        // 干扰项也“吹入”完成后，才将流程推进到下一阶段
+        stageIndex.value = 3
+      })
+      runningTimeouts.delete(moveTimerId)
+    }, moveDuration)
+    runningTimeouts.add(moveTimerId)
   }, 500) // 延迟 0.5s 执行变色和打标签
   runningTimeouts.add(labelTimerId)
 }
@@ -368,12 +433,12 @@ const reorderReceivedBlocks = () => {
   })
 }
 
-// 执行：开始识别
-const triggerIdentify = () => {
-  // 必须在流程为3才能注入标识
-  if (stageIndex.value !== 3) return
-  stageIndex.value = 4
+// 新增函数：执行识别
+// (此函数在 triggerIdentify 内部调用)
+const proceedWithIdentification = () => {
+  stageIndex.value = 4 // 激活“识别中”状态
   const zoneWidth = 100 / 5
+  // 筛选时排除了干扰项（它们已被移除）
   const businessBlocks = dataBlocks.value.filter((b) => b.state === 'toIdentifying')
   const numCols = 4 //在识别区排列的列数
   const numRows = Math.ceil(businessBlocks.length / numCols) //计算列数
@@ -431,6 +496,44 @@ const triggerIdentify = () => {
     runningTimeouts.delete(timerId1)
   }, 2500) // 延迟2.5秒
   runningTimeouts.add(timerId1)
+}
+
+// 执行：开始识别
+const triggerIdentify = () => {
+  // 必须在流程为3才能开始识别
+  if (stageIndex.value !== 3) return
+  // 按钮禁用与干扰项消除
+  stageIndex.value = -4 // 设置为临时状态 -4，禁用所有按钮
+
+  const decoys = dataBlocks.value.filter((b) => b.type === 'decoy')
+  // 增加排序和交错延迟
+  decoys.sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)) // 按Y轴排序
+
+  if (decoys.length > 0) {
+    // 1. 如果有干扰项，触发它们的“向上吹出”消除动画
+    decoys.forEach((decoy, index) => {
+      // decoy.style.transitionDelay = `${index * 0.05}s`
+      decoy.style.animationDelay = `${index * 0.05}s`
+      decoy.style.transitionDelay = ''
+      decoy.state = 'decoy-removing' // 触发 CSS 消失动画
+    })
+
+    // 2. 在消除动画 (1s + 交错延迟) 结束后，再执行后续逻辑
+    const baseRemovalTime = 1000 // 对应 CSS 的 1s
+    const totalRemovalTime = baseRemovalTime + (decoys.length - 1) * 50
+
+    const removalTimerId = setTimeout(() => {
+      // 3. 从主数组中彻底移除干扰项
+      dataBlocks.value = dataBlocks.value.filter((b) => b.type !== 'decoy')
+      // 4. 继续执行原本的识别逻辑
+      proceedWithIdentification()
+      runningTimeouts.delete(removalTimerId)
+    }, totalRemovalTime) // 使用计算后的总时间
+    runningTimeouts.add(removalTimerId)
+  } else {
+    // 没有干扰项，立即执行
+    proceedWithIdentification()
+  }
 }
 
 // onMounted(() => {
@@ -496,7 +599,7 @@ const isFiltering = ref(false)
             class="btn-label"
             @click="triggerLabel"
             size="default"
-            :disabled="stageIndex !== 2"
+            :disabled="stageIndex !== 2 || isFiltering"
           >
             注入标识
           </el-button>
@@ -1089,6 +1192,13 @@ const isFiltering = ref(false)
   box-shadow: 0 0 15px #ff69b4; /* 粉色发光效果 */
 }
 
+/* 新增干扰项样式 */
+.data-block.decoy .inner-block {
+  background-color: #909399; /* 灰白色 */
+  border-color: #c0c4cc;
+  box-shadow: 0 0 10px #909399;
+}
+
 /* 状态动画 */
 .data-block.idle,
 .data-block.moving,
@@ -1099,6 +1209,39 @@ const isFiltering = ref(false)
 
 .data-block.received {
   animation: none; /* 到达终点后停止浮动 */
+}
+
+/* 干扰项动画 */
+.data-block.decoy-idle {
+  /* 干扰项吹入动画，比标准移动(2.5s)快 */
+  transition:
+    top 1.5s cubic-bezier(0.2, 0.8, 0.7, 1),
+    left 1.5s cubic-bezier(0.2, 0.8, 0.7, 1),
+    opacity 0.6s ease,
+    transform 0.6s ease;
+  animation: float 4s ease-in-out infinite; /* 同样浮动 */
+}
+
+/* 干扰项消除动画（向上吹出） */
+.data-block.decoy-removing {
+  animation-name: blow-out-up;
+  animation-duration: 1s; /* 必须匹配 JS 中的 baseRemovalTime */
+  animation-timing-function: cubic-bezier(0.5, 0, 0.75, 1);
+  animation-fill-mode: forwards; /* 关键：使动画停留在 'to' 状态 */
+}
+/* 干扰项向上吹出动画 */
+@keyframes blow-out-up {
+  from {
+    /* 动画开始时：保持原样，完全不透明 */
+    opacity: 1;
+    transform: rotateX(10deg) scale(1);
+  }
+  to {
+    /* 动画结束时：移动到顶部外侧、完全透明、缩小 */
+    top: -20%;
+    opacity: 0;
+    transform: rotateX(10deg) scale(0.5);
+  }
 }
 
 @keyframes float {
